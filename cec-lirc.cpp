@@ -127,6 +127,7 @@ void turnAudioOn() {
     cerr << "CECCommand: lirc_send_one KEY_POWER failed" << endl;
   }
   CECAdapter->AudioEnable(true);
+  CECAdapter->PowerOnDevices((cec_logical_address) CEC_DEVICE_TYPE_AUDIO_SYSTEM);
 }
 
 void turnAudioOff() {
@@ -136,6 +137,7 @@ void turnAudioOff() {
     cerr << "CECCommand: lirc_send_one KEY_SUSPEND failed" << endl;
   }
   // :TODO: CCECAudioSystem::SetSystemAudioModeStatus
+  CECAdapter->StandbyDevices((cec_logical_address) CEC_DEVICE_TYPE_AUDIO_SYSTEM);
   CECAdapter->AudioEnable(false);
 }
 
@@ -144,9 +146,13 @@ void CECCommand(void *cbParam, const cec_command *command) {
       && cout << "CECCommand: opcode " << hex << unsigned(command->opcode)
           << " " << unsigned(command->initiator) << " -> "
           << unsigned(command->destination) << endl;
+  cec_power_status power;
+
   switch (command->opcode) {
   case CEC_OPCODE_STANDBY: //0x36 0f:36
-    turnAudioOff();
+    if (command->initiator == (cec_logical_address)CEC_DEVICE_TYPE_TV){
+      turnAudioOff();
+    }
     break;
   case CEC_OPCODE_USER_CONTROL_PRESSED: // 0x44
     break;
@@ -168,14 +174,42 @@ void CECCommand(void *cbParam, const cec_command *command) {
   case CEC_OPCODE_SYSTEM_AUDIO_MODE_STATUS: // 0x7E
     break;
   case CEC_OPCODE_ROUTING_CHANGE: // 0x80
+    if (command->initiator == (cec_logical_address)CEC_DEVICE_TYPE_TV) {
+      // TV is on turn audio on
+      turnAudioOn();
+    }
     break;
   case CEC_OPCODE_ACTIVE_SOURCE: // 0x82
     break;
+  case CEC_OPCODE_SET_STREAM_PATH: // 0x86
+    break;
   case CEC_OPCODE_VENDOR_COMMAND: //0x89
     break;
+  case CEC_OPCODE_GIVE_DEVICE_POWER_STATUS: //0x8F
+    // User changes source (This implies that the TV is on)
+    // TV(0) -> Audio(5): give device power status (8F)
+    // Audio(5) --> TV(0): on
+    power = CECAdapter->GetDevicePowerStatus(command->destination);
+    (logMask & CEC_LOG_DEBUG)
+        && cout << "Power Status(" <<  CECAdapter->ToString(command->destination)
+        << "): " << CECAdapter->ToString(power) << endl;
+    if (command->destination ==
+        (cec_logical_address)CEC_DEVICE_TYPE_AUDIO_SYSTEM) {
+      if (power == CEC_POWER_STATUS_ON) {
+        turnAudioOn();
+      } else if (power == CEC_POWER_STATUS_STANDBY) {
+        turnAudioOff();
+      }
+    }
+    break;
   case CEC_OPCODE_REPORT_POWER_STATUS: // 0x90
-    if (command->parameters.data[0] == CEC_POWER_STATUS_STANDBY) {
-      turnAudioOff();
+    if (command->initiator == (cec_logical_address)CEC_DEVICE_TYPE_TV) {
+      if (command->parameters.data[0] == CEC_POWER_STATUS_ON) {
+        turnAudioOn();
+      }
+      else if (command->parameters.data[0] == CEC_POWER_STATUS_STANDBY) {
+        turnAudioOff();
+      }
     }
     break;
   case CEC_OPCODE_REQUEST_SHORT_AUDIO_DESCRIPTORS:  // 0xA4
@@ -230,8 +264,10 @@ int main(int argc, char *argv[]) {
   CECCallbacks.alert = &CECAlert;
   CECConfig.callbacks = &CECCallbacks;
 
+  // Adding tuner makes audio not function
+  // CECConfig.deviceTypes.Add(CEC_DEVICE_TYPE_TUNER);
   CECConfig.deviceTypes.Add(CEC_DEVICE_TYPE_AUDIO_SYSTEM);
-//  CECConfig.deviceTypes.Add(CEC_DEVICE_TYPE_TUNER);
+  CECConfig.deviceTypes.Add(CEC_DEVICE_TYPE_PLAYBACK_DEVICE);
 
   if (!(CECAdapter = LibCecInitialise(&CECConfig))) {
     cerr << "LibCecInitialise failed" << endl;
