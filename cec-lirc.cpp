@@ -7,6 +7,7 @@
 #include <chrono>
 #include <iomanip>
 #include <argp.h>
+#include <stdlib.h>
 
 #include "libcec/cec.h"
 #include "libcec/cecloader.h"
@@ -20,6 +21,11 @@ static bool exit_now = false;
 static int lircFd = -1;
 static uint32_t logMask = (CEC_LOG_ERROR | CEC_LOG_WARNING);
 static ICECAdapter *CECAdapter;
+//static CCECProcessor *m_processor;
+
+static char *pKodiUser = NULL;
+static char *pKodiPwd = NULL;
+static char *pKodiHost = NULL;
 
 const char *argp_program_version = "cec-lirc 1.0";
 const char *argp_program_bug_address = "https://github.com/ballle98/cec-lirc";
@@ -27,12 +33,24 @@ const char *argp_program_bug_address = "https://github.com/ballle98/cec-lirc";
 /* The options we understand. */
 static struct argp_option options[] = { { "verbose", 'v', 0, 0,
     "Produce verbose output" },
-    { "quiet", 'q', 0, 0, "Don't produce any output" }, { 0 } };
+    { "quiet", 'q', 0, 0, "Don't produce any output" },
+    { "user", 'u', "USER", 0, "Kodi web interface username" },
+    { "kodi", 'k', "HOST", 0, "Kodi host:port (i.e. localhost:8080)" },
+    { "password", 'p', "PASSWORD", 0, "Kodi web interface password" }, { 0 } };
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
   switch (key) {
+  case 'k':
+    pKodiHost = arg;
+    break;
+  case 'p':
+    pKodiPwd = arg;
+    break;
   case 'q':
     logMask = 0;
+    break;
+  case 'u':
+    pKodiUser = arg;
     break;
   case 'v':
     logMask = CEC_LOG_ALL;
@@ -76,15 +94,45 @@ int send_packet(lirc_cmd_ctx *ctx, int fd) {
 
 void CECKeyPress(void *cbParam, const cec_keypress *key) {
   static lirc_cmd_ctx ctx;
+  const char *pKodiCmd = NULL;
 
   (logMask & CEC_LOG_DEBUG)
       && cout << "CECKeyPress: key " << hex << unsigned(key->keycode)
           << " duration " << dec << unsigned(key->duration) << endl;
 
   switch (key->keycode) {
-  case CEC_USER_CONTROL_CODE_VOLUME_UP:
-    if (key->duration == 0) // key pressed
-        {
+  case CEC_USER_CONTROL_CODE_SELECT: //0x00
+    if (key->duration > 0) { // key released
+      pKodiCmd = "Input.Select";
+    }
+    break;
+  case CEC_USER_CONTROL_CODE_UP: //0x01
+    if (key->duration > 0) { // key released
+      pKodiCmd = "Input.Up";
+    }
+    break;
+  case CEC_USER_CONTROL_CODE_DOWN: //0x02
+    if (key->duration > 0) { // key released
+      pKodiCmd = "Input.Down";
+    }
+    break;
+  case CEC_USER_CONTROL_CODE_LEFT: //0x03
+    if (key->duration > 0) { // key released
+      pKodiCmd  = "Input.Left";
+    }
+    break;
+  case CEC_USER_CONTROL_CODE_RIGHT: //0x04
+    if (key->duration > 0) { // key released
+      pKodiCmd  = "Input.Right";
+    }
+    break;
+  case CEC_USER_CONTROL_CODE_EXIT: //0x0D
+    if (key->duration > 0) { // key released
+      pKodiCmd  = "Input.Back";
+    }
+    break;
+  case CEC_USER_CONTROL_CODE_VOLUME_UP: //0x41
+    if (key->duration == 0) { // key pressed
       lirc_command_init(&ctx, "SEND_START Yamaha_RAV283 KEY_VOLUMEUP\n");
     } else {
       lirc_command_init(&ctx, "SEND_STOP Yamaha_RAV283 KEY_VOLUMEUP\n");
@@ -94,9 +142,8 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
     }
     send_packet(&ctx, lircFd);
     break;
-  case CEC_USER_CONTROL_CODE_VOLUME_DOWN:
-    if (key->duration == 0) // key pressed
-        {
+  case CEC_USER_CONTROL_CODE_VOLUME_DOWN: //0x42
+    if (key->duration == 0) { // key pressed
       lirc_command_init(&ctx, "SEND_START Yamaha_RAV283 KEY_VOLUMEDOWN\n");
     } else {
       lirc_command_init(&ctx, "SEND_STOP Yamaha_RAV283 KEY_VOLUMEDOWN\n");
@@ -106,9 +153,8 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
     }
     send_packet(&ctx, lircFd);
     break;
-  case CEC_USER_CONTROL_CODE_MUTE:
-    if (key->duration > 0) // key released
-        {
+  case CEC_USER_CONTROL_CODE_MUTE: //0x43
+    if (key->duration > 0) { // key released
       if (lirc_send_one(lircFd, "Yamaha_RAV283", "KEY_MUTE") == -1) {
         cerr << "CECKeyPress: lirc_send_one KEY_MUTE failed" << endl;
       }
@@ -118,6 +164,19 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
     break;
   }
 
+  if ((pKodiHost != NULL) && (pKodiCmd != NULL)  && (pKodiUser != NULL) &&
+      (pKodiPwd != NULL)){
+    char cmd_buff[256];
+    int ret = 0;
+
+    snprintf(cmd_buff, sizeof(cmd_buff),
+        "curl -sS -u %s:%s -H 'Content-Type: application/json' -d '{\"jsonrpc\": \"2.0\", \"method\": \"%s\", \"id\": 1}' %s/jsonrpc > /dev/null",
+        pKodiUser, pKodiPwd, pKodiCmd, pKodiHost);
+    (logMask & CEC_LOG_DEBUG) && cout << cmd_buff << endl;
+    if ((ret = system(cmd_buff))) {
+      cerr << cmd_buff << " ERROR: " << strerror(ret) << endl;
+    }
+  }
 }
 
 void turnAudioOn() {
@@ -221,6 +280,10 @@ void CECCommand(void *cbParam, const cec_command *command) {
 
 void CECAlert(void *cbParam, const libcec_alert type,
     const libcec_parameter param) {
+
+  (logMask & CEC_LOG_DEBUG)
+      && cout << "CECAlert: type " << hex << unsigned(type) << endl;
+
   switch (type) {
   case CEC_ALERT_CONNECTION_LOST:
     cout << "Connection lost" << endl;
@@ -228,6 +291,15 @@ void CECAlert(void *cbParam, const libcec_alert type,
   default:
     break;
   }
+}
+
+void CECSourceActivated(void* cbParam, const cec_logical_address
+    logicalAddress, const uint8_t bActivated) {
+
+  (logMask & CEC_LOG_DEBUG)
+      && cout << "CECSourceActivated: " << unsigned(logicalAddress) <<
+      unsigned(bActivated) << endl;
+
 }
 
 int main(int argc, char *argv[]) {
@@ -262,6 +334,7 @@ int main(int argc, char *argv[]) {
   CECCallbacks.keyPress = &CECKeyPress;
   CECCallbacks.commandReceived = &CECCommand;
   CECCallbacks.alert = &CECAlert;
+  CECCallbacks.sourceActivated = &CECSourceActivated;
   CECConfig.callbacks = &CECCallbacks;
 
   // Adding tuner makes audio not function
