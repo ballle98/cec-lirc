@@ -8,10 +8,12 @@
 #include <iomanip>
 #include <argp.h>
 #include <stdlib.h>
+#include <sys/socket.h>
 
 #include "libcec/cec.h"
 #include "libcec/cecloader.h"
 #include "lirc_client.h"
+#include "xbmcclient.h"
 
 using namespace std;
 using namespace CEC;
@@ -21,11 +23,9 @@ static bool exit_now = false;
 static int lircFd = -1;
 static uint32_t logMask = (CEC_LOG_ERROR | CEC_LOG_WARNING);
 static ICECAdapter *CECAdapter;
-//static CCECProcessor *m_processor;
+static CXBMCClient xbmc;
 
-static char *pKodiUser = NULL;
-static char *pKodiPwd = NULL;
-static char *pKodiHost = NULL;
+//static CCECProcessor *m_processor;
 
 const char *argp_program_version = "cec-lirc 1.0";
 const char *argp_program_bug_address = "https://github.com/ballle98/cec-lirc";
@@ -34,23 +34,12 @@ const char *argp_program_bug_address = "https://github.com/ballle98/cec-lirc";
 static struct argp_option options[] = { { "verbose", 'v', 0, 0,
     "Produce verbose output" },
     { "quiet", 'q', 0, 0, "Don't produce any output" },
-    { "user", 'u', "USER", 0, "Kodi web interface username" },
-    { "kodi", 'k', "HOST", 0, "Kodi host:port (i.e. localhost:8080)" },
-    { "password", 'p', "PASSWORD", 0, "Kodi web interface password" }, { 0 } };
+    { 0 } };
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
   switch (key) {
-  case 'k':
-    pKodiHost = arg;
-    break;
-  case 'p':
-    pKodiPwd = arg;
-    break;
   case 'q':
     logMask = 0;
-    break;
-  case 'u':
-    pKodiUser = arg;
     break;
   case 'v':
     logMask = CEC_LOG_ALL;
@@ -94,7 +83,6 @@ int send_packet(lirc_cmd_ctx *ctx, int fd) {
 
 void CECKeyPress(void *cbParam, const cec_keypress *key) {
   static lirc_cmd_ctx ctx;
-  const char *pKodiCmd = NULL;
 
   (logMask & CEC_LOG_DEBUG)
       && cout << "CECKeyPress: key " << hex << unsigned(key->keycode)
@@ -102,33 +90,45 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
 
   switch (key->keycode) {
   case CEC_USER_CONTROL_CODE_SELECT: //0x00
-    if (key->duration > 0) { // key released
-      pKodiCmd = "Input.Select";
+    if (key->duration == 0) { // key down
+      xbmc.SendButton("select", "R1", BTN_DOWN);
+    } else {
+      xbmc.SendButton(0x01, BTN_UP);
     }
     break;
   case CEC_USER_CONTROL_CODE_UP: //0x01
-    if (key->duration > 0) { // key released
-      pKodiCmd = "Input.Up";
+    if (key->duration == 0) { // key down
+      xbmc.SendButton("up", "R1", BTN_DOWN);
+    } else {
+      xbmc.SendButton(0x01, BTN_UP);
     }
     break;
   case CEC_USER_CONTROL_CODE_DOWN: //0x02
-    if (key->duration > 0) { // key released
-      pKodiCmd = "Input.Down";
+    if (key->duration == 0) { // key down
+      xbmc.SendButton("down", "R1", BTN_DOWN);
+    } else {
+      xbmc.SendButton(0x01, BTN_UP);
     }
     break;
   case CEC_USER_CONTROL_CODE_LEFT: //0x03
-    if (key->duration > 0) { // key released
-      pKodiCmd  = "Input.Left";
+    if (key->duration == 0) { // key down
+      xbmc.SendButton("left", "R1", BTN_DOWN);
+    } else {
+      xbmc.SendButton(0x01, BTN_UP);
     }
     break;
   case CEC_USER_CONTROL_CODE_RIGHT: //0x04
-    if (key->duration > 0) { // key released
-      pKodiCmd  = "Input.Right";
+    if (key->duration == 0) { // key down
+      xbmc.SendButton("right", "R1", BTN_DOWN);
+    } else {
+      xbmc.SendButton(0x01, BTN_UP);
     }
     break;
   case CEC_USER_CONTROL_CODE_EXIT: //0x0D
-    if (key->duration > 0) { // key released
-      pKodiCmd  = "Input.Back";
+    if (key->duration == 0) { // key down
+      xbmc.SendButton("back", "R1", BTN_DOWN);
+    } else {
+      xbmc.SendButton(0x01, BTN_UP);
     }
     break;
   case CEC_USER_CONTROL_CODE_VOLUME_UP: //0x41
@@ -164,19 +164,6 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
     break;
   }
 
-  if ((pKodiHost != NULL) && (pKodiCmd != NULL)  && (pKodiUser != NULL) &&
-      (pKodiPwd != NULL)){
-    char cmd_buff[256];
-    int ret = 0;
-
-    snprintf(cmd_buff, sizeof(cmd_buff),
-        "curl -sS -u %s:%s -H 'Content-Type: application/json' -d '{\"jsonrpc\": \"2.0\", \"method\": \"%s\", \"id\": 1}' %s/jsonrpc > /dev/null",
-        pKodiUser, pKodiPwd, pKodiCmd, pKodiHost);
-    (logMask & CEC_LOG_DEBUG) && cout << cmd_buff << endl;
-    if ((ret = system(cmd_buff))) {
-      cerr << cmd_buff << " ERROR: " << strerror(ret) << endl;
-    }
-  }
 }
 
 void turnAudioOn() {
@@ -317,12 +304,14 @@ int main(int argc, char *argv[]) {
   lircFd = lirc_get_local_socket("/var/run/lirc/lircd-tx", 0);
   if (lircFd < 0) {
     cerr << "Failed to get LIRC local socket" << endl;
-    UnloadLibCec(CECAdapter);
     return 1;
   }
 
   (logMask & CEC_LOG_DEBUG)
       && cout << "lirc_get_local_socket " << lircFd << endl;
+
+  xbmc.SendHELO("cec-lirc remote", ICON_NONE);
+
 
   CECConfig.Clear();
   CECCallbacks.Clear();
