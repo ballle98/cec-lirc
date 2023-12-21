@@ -81,6 +81,18 @@ int send_packet(lirc_cmd_ctx *ctx, int fd) {
   return r == 0 ? 0 : -1;
 }
 
+void xbmcKeyPress(const char *Button, unsigned int duration) {
+  (logMask & CEC_LOG_DEBUG)
+      && cout << "xbmcKeyPress: " <<  Button <<
+      " duration " << dec << unsigned(duration) << endl;
+
+  if (duration == 0) { // key down
+    xbmc.SendButton(Button, "R1", BTN_DOWN);
+  } else {
+    xbmc.SendButton(0x01, BTN_UP);
+  }
+}
+
 void CECKeyPress(void *cbParam, const cec_keypress *key) {
   static lirc_cmd_ctx ctx;
 
@@ -90,50 +102,27 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
 
   switch (key->keycode) {
   case CEC_USER_CONTROL_CODE_SELECT: //0x00
-    if (key->duration == 0) { // key down
-      xbmc.SendButton("select", "R1", BTN_DOWN);
-    } else {
-      xbmc.SendButton(0x01, BTN_UP);
-    }
+    xbmcKeyPress("select", key->duration);
     break;
   case CEC_USER_CONTROL_CODE_UP: //0x01
-    if (key->duration == 0) { // key down
-      xbmc.SendButton("up", "R1", BTN_DOWN);
-    } else {
-      xbmc.SendButton(0x01, BTN_UP);
-    }
+    xbmcKeyPress("up", key->duration);
     break;
   case CEC_USER_CONTROL_CODE_DOWN: //0x02
-    if (key->duration == 0) { // key down
-      xbmc.SendButton("down", "R1", BTN_DOWN);
-    } else {
-      xbmc.SendButton(0x01, BTN_UP);
-    }
+    xbmcKeyPress("down", key->duration);
     break;
   case CEC_USER_CONTROL_CODE_LEFT: //0x03
-    if (key->duration == 0) { // key down
-      xbmc.SendButton("left", "R1", BTN_DOWN);
-    } else {
-      xbmc.SendButton(0x01, BTN_UP);
-    }
+    xbmcKeyPress("left", key->duration);
     break;
   case CEC_USER_CONTROL_CODE_RIGHT: //0x04
-    if (key->duration == 0) { // key down
-      xbmc.SendButton("right", "R1", BTN_DOWN);
-    } else {
-      xbmc.SendButton(0x01, BTN_UP);
-    }
+    xbmcKeyPress("right", key->duration);
     break;
   case CEC_USER_CONTROL_CODE_EXIT: //0x0D
-    if (key->duration == 0) { // key down
-      xbmc.SendButton("back", "R1", BTN_DOWN);
-    } else {
-      xbmc.SendButton(0x01, BTN_UP);
-    }
+    xbmcKeyPress("back", key->duration);
     break;
   case CEC_USER_CONTROL_CODE_VOLUME_UP: //0x41
     if (key->duration == 0) { // key pressed
       lirc_command_init(&ctx, "SEND_START Yamaha_RAV283 KEY_VOLUMEUP\n");
+      xbmc.SendNOTIFICATION("Volume Up", "CEC Remote", ICON_NONE);
     } else {
       lirc_command_init(&ctx, "SEND_STOP Yamaha_RAV283 KEY_VOLUMEUP\n");
     }
@@ -145,6 +134,7 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
   case CEC_USER_CONTROL_CODE_VOLUME_DOWN: //0x42
     if (key->duration == 0) { // key pressed
       lirc_command_init(&ctx, "SEND_START Yamaha_RAV283 KEY_VOLUMEDOWN\n");
+      xbmc.SendNOTIFICATION("Volume Down", "CEC Remote", ICON_NONE);
     } else {
       lirc_command_init(&ctx, "SEND_STOP Yamaha_RAV283 KEY_VOLUMEDOWN\n");
     }
@@ -154,13 +144,28 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
     send_packet(&ctx, lircFd);
     break;
   case CEC_USER_CONTROL_CODE_MUTE: //0x43
-    if (key->duration > 0) { // key released
+    if (key->duration == 0) { // key pressed
       if (lirc_send_one(lircFd, "Yamaha_RAV283", "KEY_MUTE") == -1) {
         cerr << "CECKeyPress: lirc_send_one KEY_MUTE failed" << endl;
       }
+      xbmc.SendNOTIFICATION("Mute", "CEC Remote", ICON_NONE);
     }
     break;
+  case CEC_USER_CONTROL_CODE_F1_BLUE: //0x71
+    xbmcKeyPress("info", key->duration);
+    break;
+  case CEC_USER_CONTROL_CODE_F2_RED: //0x72
+    xbmcKeyPress("menu", key->duration);
+    break;
+  case CEC_USER_CONTROL_CODE_F3_GREEN: //0x73
+    xbmcKeyPress("display", key->duration);
+    break;
+  case CEC_USER_CONTROL_CODE_F4_YELLOW: //0x74
+    xbmcKeyPress("title", key->duration);
+    break;
   default:
+    (logMask & CEC_LOG_DEBUG)
+        && cout << "unknown key " << hex << unsigned(key->keycode) << endl;
     break;
   }
 
@@ -168,9 +173,9 @@ void CECKeyPress(void *cbParam, const cec_keypress *key) {
 
 void turnAudioOn() {
   (logMask & CEC_LOG_DEBUG)
-      && cout << "CECCommand: lirc_send_one KEY_POWER" << endl;
+      && cout << "turnAudioOn: lirc_send_one KEY_POWER" << endl;
   if (lirc_send_one(lircFd, "Yamaha_RAV283", "KEY_POWER") == -1) {
-    cerr << "CECCommand: lirc_send_one KEY_POWER failed" << endl;
+    cerr << "turnAudioOn: lirc_send_one KEY_POWER failed" << endl;
   }
   CECAdapter->AudioEnable(true);
   CECAdapter->PowerOnDevices((cec_logical_address) CEC_DEVICE_TYPE_AUDIO_SYSTEM);
@@ -178,9 +183,9 @@ void turnAudioOn() {
 
 void turnAudioOff() {
   (logMask & CEC_LOG_DEBUG)
-      && cout << "CECCommand: lirc_send_one KEY_SUSPEND" << endl;
+      && cout << "turnAudioOff CECCommand: lirc_send_one KEY_SUSPEND" << endl;
   if (lirc_send_one(lircFd, "Yamaha_RAV283", "KEY_SUSPEND") == -1) {
-    cerr << "CECCommand: lirc_send_one KEY_SUSPEND failed" << endl;
+    cerr << "turnAudioOff: lirc_send_one KEY_SUSPEND failed" << endl;
   }
   // :TODO: CCECAudioSystem::SetSystemAudioModeStatus
   CECAdapter->StandbyDevices((cec_logical_address) CEC_DEVICE_TYPE_AUDIO_SYSTEM);
