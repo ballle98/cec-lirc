@@ -198,6 +198,7 @@ void CECCommand(void *cbParam, const cec_command *command) {
           << " " << unsigned(command->initiator) << " -> "
           << unsigned(command->destination) << endl;
   cec_power_status power;
+  cec_power_status tvPower;
 
   switch (command->opcode) {
   case CEC_OPCODE_STANDBY: //0x36 0f:36
@@ -241,12 +242,15 @@ void CECCommand(void *cbParam, const cec_command *command) {
     // TV(0) -> Audio(5): give device power status (8F)
     // Audio(5) --> TV(0): on
     power = CECAdapter->GetDevicePowerStatus(command->destination);
+    tvPower = CECAdapter->GetDevicePowerStatus((cec_logical_address)CEC_DEVICE_TYPE_TV);
     (logMask & CEC_LOG_DEBUG)
         && cout << "Power Status(" <<  CECAdapter->ToString(command->destination)
-        << "): " << CECAdapter->ToString(power) << endl;
+        << "): " << CECAdapter->ToString(power) << " TV Power: " <<
+        CECAdapter->ToString(tvPower) << endl;
+
     if (command->destination ==
         (cec_logical_address)CEC_DEVICE_TYPE_AUDIO_SYSTEM) {
-      if (power == CEC_POWER_STATUS_ON) {
+      if ((tvPower == CEC_POWER_STATUS_ON) && (power == CEC_POWER_STATUS_ON)) {
         turnAudioOn();
       } else if (power == CEC_POWER_STATUS_STANDBY) {
         turnAudioOff();
