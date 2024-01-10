@@ -293,8 +293,15 @@ void CECSourceActivated(void* cbParam, const cec_logical_address
     logicalAddress, const uint8_t bActivated) {
 
   (logMask & CEC_LOG_DEBUG)
-      && cout << "CECSourceActivated: " << unsigned(logicalAddress) <<
-      unsigned(bActivated) << endl;
+      && cout << "CECSourceActivated: LA=" << unsigned(logicalAddress) <<
+      " activated=" << unsigned(bActivated) << endl;
+
+  if ((logicalAddress ==
+      (cec_logical_address)CEC_DEVICE_TYPE_AUDIO_SYSTEM)  && (!bActivated)){
+    (logMask & CEC_LOG_DEBUG)
+        && cout << "Stop Kodi playback" << endl;
+    xbmc.SendButton("stop", "R1", BTN_NO_REPEAT);
+  }
 
 }
 
