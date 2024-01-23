@@ -190,6 +190,10 @@ void turnAudioOff() {
   // :TODO: CCECAudioSystem::SetSystemAudioModeStatus
   CECAdapter->StandbyDevices((cec_logical_address) CEC_DEVICE_TYPE_AUDIO_SYSTEM);
   CECAdapter->AudioEnable(false);
+
+  (logMask & CEC_LOG_DEBUG)
+       && cout << "Stop Kodi playback" << endl;
+  xbmc.SendButton("stop", "R1", BTN_NO_REPEAT);
 }
 
 void CECCommand(void *cbParam, const cec_command *command) {
